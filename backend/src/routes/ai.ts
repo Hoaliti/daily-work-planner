@@ -1,22 +1,24 @@
 import { Router, Request, Response } from 'express';
-import { agentService, AgentType } from '../services/agentService';
 import { glmService } from '../services/glmService';
 
 const router = Router();
 
 /**
  * POST /api/ai/chat
- * Body: { agent: string, message: string, model?: string }
+ * Body: { message: string, model?: string }
  */
 router.post('/chat', async (req: Request, res: Response) => {
-  const { agent, message, model } = req.body;
+  const { message, model } = req.body;
 
-  if (!agent || !message) {
-    return res.status(400).json({ error: 'Agent and message are required' });
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required' });
   }
 
   try {
-    const response = await agentService.chat(agent as AgentType, message, model);
+    const response = await glmService.chat(
+      [{ role: 'user', content: message }],
+      model || process.env.GLM_MODEL_FAST || 'glm-4.7'
+    );
     res.json({ response });
   } catch (error: unknown) {
     console.error('AI Chat Error:', error);
@@ -31,7 +33,7 @@ router.post('/chat', async (req: Request, res: Response) => {
  * Parses a Jira ticket using GLM-5 via Python agent service
  */
 router.post('/parse-ticket', async (req: Request, res: Response) => {
-  const { ticket_key, ticket_data, model } = req.body;
+  const { ticket_key, ticket_data } = req.body;
 
   if (!ticket_key || !ticket_data) {
     return res.status(400).json({ error: 'ticket_key and ticket_data are required' });
@@ -43,6 +45,28 @@ router.post('/parse-ticket', async (req: Request, res: Response) => {
   } catch (error: unknown) {
     console.error('Parse Ticket Error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Failed to parse ticket';
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+/**
+ * POST /api/ai/analyze-task
+ * Body: { description: string, model?: string }
+ * Analyzes a manual task description using GLM
+ */
+router.post('/analyze-task', async (req: Request, res: Response) => {
+  const { description } = req.body;
+
+  if (!description) {
+    return res.status(400).json({ error: 'description is required' });
+  }
+
+  try {
+    const analysis = await glmService.analyzeTask(description);
+    res.json(analysis);
+  } catch (error: unknown) {
+    console.error('Analyze Task Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to analyze task';
     res.status(500).json({ error: errorMessage });
   }
 });

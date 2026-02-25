@@ -4,6 +4,7 @@ Uses Z.ai SDK (zai-sdk) for GLM-5 model calls
 """
 
 import os
+import json
 from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -13,7 +14,11 @@ from zai import ZaiClient
 
 load_dotenv()
 
-app = FastAPI(title="Agent Service", description="Python agent service using GLM-5")
+app = FastAPI(
+    title="Agent Service",
+    description="Python agent service using GLM-5 via Z.ai SDK",
+    version="1.0.0"
+)
 
 # Initialize Z.ai client
 zai_api_key = os.getenv("ZAI_API_KEY")
@@ -22,11 +27,16 @@ if not zai_api_key:
 
 client = ZaiClient(api_key=zai_api_key)
 
+# Default models
+GLM_MODEL_FAST = os.getenv("GLM_MODEL_FAST", "glm-4.7")
+GLM_MODEL_SMART = os.getenv("GLM_MODEL_SMART", "glm-5")
 
+
+# Request/Response Models
 class ChatRequest(BaseModel):
     message: str
     agent_type: str = "planner"
-    model: str = "glm-5"
+    model: str = GLM_MODEL_FAST
     max_tokens: int = 4096
     temperature: float = 0.7
     thinking_enabled: bool = True
@@ -35,7 +45,12 @@ class ChatRequest(BaseModel):
 class TicketParseRequest(BaseModel):
     ticket_key: str
     ticket_data: dict
-    model: str = "glm-5"
+    model: str = GLM_MODEL_SMART
+
+
+class TaskAnalyzeRequest(BaseModel):
+    description: str
+    model: str = GLM_MODEL_FAST
 
 
 class ChatResponse(BaseModel):
@@ -54,7 +69,13 @@ class ParsedTicket(BaseModel):
     story_points: Optional[float] = None
     labels: list[str] = []
     components: list[str] = []
-    ai_analysis: str
+    raw_analysis: str
+
+
+class TaskAnalysis(BaseModel):
+    title: str
+    priority: str
+    description: str
 
 
 # Agent system prompts
@@ -76,13 +97,13 @@ You help with complex debugging, performance optimization, and advanced technica
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "service": "agent_service"}
+    return {"status": "ok", "service": "agent_service", "sdk": "zai-sdk"}
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Chat with an AI agent using GLM-5
+    Chat with an AI agent using Z.ai SDK
     """
     system_prompt = AGENT_PROMPTS.get(request.agent_type, AGENT_PROMPTS["planner"])
     
@@ -115,48 +136,61 @@ async def chat(request: ChatRequest):
 @app.post("/parse-ticket", response_model=ParsedTicket)
 async def parse_ticket(request: TicketParseRequest):
     """
-    Parse a Jira ticket using GLM-5 and extract structured information
+    Parse a Jira ticket using Z.ai SDK and extract structured information
     """
     ticket_json = request.ticket_data
     
     # Extract fields from Jira response
     fields = ticket_json.get("fields", {})
     
-    prompt = f"""Analyze this Jira ticket and provide a structured summary.
+    prompt = f"""Analyze this Jira ticket and extract structured information.
 
 Ticket Key: {request.ticket_key}
 Raw Data:
 - Summary: {fields.get('summary', 'N/A')}
 - Status: {fields.get('status', {}).get('name', 'N/A')}
 - Priority: {fields.get('priority', {}).get('name', 'N/A')}
-- Description: {fields.get('description', 'N/A')}
+- Description: {str(fields.get('description', 'N/A'))[:500]}
 - Assignee: {fields.get('assignee', {}).get('displayName', 'Unassigned') if fields.get('assignee') else 'Unassigned'}
 - Labels: {fields.get('labels', [])}
 - Components: {[c.get('name', '') for c in fields.get('components', [])]}
 
-Please provide:
+Provide:
 1. A brief analysis of what this ticket is about
 2. Any potential blockers or dependencies
-3. Estimated complexity (Low/Medium/High)
-4. Suggested approach for implementation
+3. Estimated complexity
+4. Suggested approach
 
-Format your response clearly with sections."""
+Return a JSON object with these fields:
+{{"key": "{request.ticket_key}", "summary": "brief summary", "status": "status", "priority": "High/Medium/Low", "description": "description", "assignee": "name", "story_points": null, "labels": [], "components": [], "raw_analysis": "your analysis"}}
+
+Return ONLY valid JSON, no markdown."""
 
     try:
         response = client.chat.completions.create(
             model=request.model,
             messages=[
-                {"role": "system", "content": "You are a Jira ticket analyzer. You help developers understand and plan their work by analyzing ticket details."},
+                {"role": "system", "content": "You are a Jira ticket analyzer. Return ONLY valid JSON, no markdown formatting."},
                 {"role": "user", "content": prompt}
             ],
             thinking={"type": "enabled"},
             max_tokens=2048,
-            temperature=0.7,
+            temperature=0.3,
         )
         
-        ai_analysis = response.choices[0].message.content
+        content = response.choices[0].message.content
         
-        # Build structured response
+        # Parse JSON from response
+        try:
+            json_start = content.find('{')
+            json_end = content.rfind('}')
+            if json_start != -1 and json_end != -1:
+                parsed = json.loads(content[json_start:json_end+1])
+                return ParsedTicket(**parsed)
+        except json.JSONDecodeError:
+            pass
+        
+        # Fallback: return with raw data
         return ParsedTicket(
             key=request.ticket_key,
             summary=fields.get("summary", ""),
@@ -164,19 +198,75 @@ Format your response clearly with sections."""
             priority=fields.get("priority", {}).get("name", "Medium"),
             description=str(fields.get("description", ""))[:500] if fields.get("description") else "",
             assignee=fields.get("assignee", {}).get("displayName") if fields.get("assignee") else None,
+            story_points=None,
             labels=fields.get("labels", []),
             components=[c.get("name", "") for c in fields.get("components", [])],
-            ai_analysis=ai_analysis
+            raw_analysis=content
         )
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse ticket: {str(e)}")
 
 
+@app.post("/analyze-task", response_model=TaskAnalysis)
+async def analyze_task(request: TaskAnalyzeRequest):
+    """
+    Analyze a manual task description using Z.ai SDK
+    Extracts title, priority, and structured description
+    """
+    prompt = f"""Analyze this task description and extract structured information.
+
+Task Description: {request.description}
+
+Extract:
+1. A concise title (max 50 characters)
+2. Priority (High/Medium/Low) based on urgency keywords
+3. A brief description of what needs to be done
+
+Return ONLY a JSON object:
+{{"title": "concise title", "priority": "High/Medium/Low", "description": "what needs to be done"}}
+
+No markdown, just valid JSON."""
+
+    try:
+        response = client.chat.completions.create(
+            model=request.model,
+            messages=[
+                {"role": "system", "content": "You are a task analyzer. Extract structured data from task descriptions. Return ONLY valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            thinking={"type": "enabled"},
+            max_tokens=512,
+            temperature=0.3,
+        )
+        
+        content = response.choices[0].message.content
+        
+        # Parse JSON from response
+        try:
+            json_start = content.find('{')
+            json_end = content.rfind('}')
+            if json_start != -1 and json_end != -1:
+                parsed = json.loads(content[json_start:json_end+1])
+                return TaskAnalysis(**parsed)
+        except json.JSONDecodeError:
+            pass
+        
+        # Fallback: use original description
+        return TaskAnalysis(
+            title=request.description[:50],
+            priority="Medium",
+            description=request.description
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze task: {str(e)}")
+
+
 @app.post("/generate-standup")
 async def generate_standup(yesterday_logs: list[dict], today_tickets: list[dict]):
     """
-    Generate standup notes using GLM-5
+    Generate standup notes using Z.ai SDK
     """
     yesterday_summary = "\n".join([
         f"- {log.get('description', 'No description')} ({log.get('duration_minutes', 0)}m)"
@@ -196,19 +286,11 @@ Yesterday I worked on:
 Today I plan to work on:
 {today_summary}
 
-Please format the response with:
-**Yesterday:**
-- [bullet points]
-
-**Today:**
-- [bullet points]
-
-**Blockers:**
-- [any blockers or "None"]"""
+Format with **Yesterday:**, **Today:**, **Blockers:** sections."""
 
     try:
         response = client.chat.completions.create(
-            model="glm-5",
+            model=GLM_MODEL_SMART,
             messages=[
                 {"role": "system", "content": "You are a standup meeting assistant. Generate clear, concise standup updates."},
                 {"role": "user", "content": prompt}

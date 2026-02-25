@@ -1,11 +1,10 @@
 import { db } from '../db';
-import { agentService } from './agentService';
+import { glmService } from './glmService';
 import { WorkLog, Ticket, Task, Standup } from '../types';
 
 export class StandupService {
   async generateStandup(date: string): Promise<Standup> {
     // 1. Get previous day's work logs
-    // Note: In a real app, we might want to find the "last working day"
     const prevDate = new Date(date);
     prevDate.setDate(prevDate.getDate() - 1);
     const prevDateStr = prevDate.toISOString().split('T')[0];
@@ -26,18 +25,19 @@ export class StandupService {
       ...activeTasks.map(t => `- [Task] ${t.title} (${t.status})`)
     ].join('\n') || 'No active tasks or tickets.';
 
-    const prompt = `
-Yesterday I worked on:
+    const prompt = `Yesterday I worked on:
 ${yesterdaySummary}
 
 Today I plan to work on:
 ${todaySummary}
 
-Please generate a concise standup update for me. Format it with "Yesterday", "Today", and "Blockers" sections.
-    `;
+Please generate a concise standup update for me. Format it with "Yesterday", "Today", and "Blockers" sections.`;
 
-    // 4. Call AI
-    const content = await agentService.chat('planner', prompt);
+    // 4. Call GLM service
+    const content = await glmService.chat([
+      { role: 'system', content: 'You are a helpful assistant that generates daily standup updates.' },
+      { role: 'user', content: prompt }
+    ]);
 
     // 5. Save to DB
     const stmt = db.prepare(`

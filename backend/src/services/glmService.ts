@@ -5,18 +5,21 @@ dotenv.config();
 
 const GLM_SERVICE_URL = process.env.GLM_SERVICE_URL || 'http://localhost:3002';
 const GLM_API_KEY = process.env.GLM_API_KEY;
+const GLM_MODEL_FAST = process.env.GLM_MODEL_FAST || 'glm-4.7';
+const GLM_MODEL_SMART = process.env.GLM_MODEL_SMART || 'glm-5';
 
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
-export interface ChatResponse {
-  response: string;
-  model: string;
+export interface TaskAnalysis {
+  title: string;
+  priority: 'High' | 'Medium' | 'Low';
+  description: string;
 }
 
-export interface TicketParseResponse {
+export interface ParsedTicket {
   key: string;
   summary: string;
   status: string;
@@ -28,19 +31,8 @@ export interface TicketParseResponse {
   raw_analysis: string;
 }
 
-export class GLMService {
-  private static instance: GLMService;
-
-  private constructor() {}
-
-  public static getInstance(): GLMService {
-    if (!GLMService.instance) {
-      GLMService.instance = new GLMService();
-    }
-    return GLMService.instance;
-  }
-
-  public async chat(messages: Message[], model: string = process.env.GLM_MODEL_FAST || 'glm-4-flash'): Promise<string> {
+class GLMServiceClass {
+  async chat(messages: Message[], model: string = GLM_MODEL_FAST): Promise<string> {
     if (!GLM_API_KEY) {
       throw new Error('GLM_API_KEY is not defined in environment variables');
     }
@@ -50,7 +42,6 @@ export class GLMService {
         `${GLM_SERVICE_URL}/chat`,
         {
           message: messages[messages.length - 1].content,
-          agent_type: 'planner',
           model,
           max_tokens: 4096,
           temperature: 0.7,
@@ -65,9 +56,8 @@ export class GLMService {
 
       if (response.data && response.data.response) {
         return response.data.response;
-      } else {
-        throw new Error('Unexpected response format from Python agent service');
       }
+      throw new Error('Unexpected response format from Python agent service');
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
         throw new Error(`Python agent service error: ${error.response?.data?.detail || error.message}`);
@@ -76,7 +66,7 @@ export class GLMService {
     }
   }
 
-  public async parseTicket(ticketKey: string, ticketData: Record<string, unknown>): Promise<TicketParseResponse> {
+  async parseTicket(ticketKey: string, ticketData: Record<string, unknown>): Promise<ParsedTicket> {
     if (!GLM_API_KEY) {
       throw new Error('GLM_API_KEY is not defined in environment variables');
     }
@@ -87,7 +77,7 @@ export class GLMService {
         {
           ticket_key: ticketKey,
           ticket_data: ticketData,
-          model: 'glm-5',
+          model: GLM_MODEL_SMART,
         },
         {
           headers: {
@@ -100,11 +90,40 @@ export class GLMService {
       return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) {
-        throw new Error(`Python agent service error: ${error.response?.data?.detail || error.message}`)
+        throw new Error(`Python agent service error: ${error.response?.data?.detail || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  async analyzeTask(description: string): Promise<TaskAnalysis> {
+    if (!GLM_API_KEY) {
+      throw new Error('GLM_API_KEY is not defined in environment variables');
+    }
+
+    try {
+      const response = await axios.post(
+        `${GLM_SERVICE_URL}/analyze-task`,
+        {
+          description,
+          model: GLM_MODEL_FAST,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GLM_API_KEY}`,
+          },
+        }
+      );
+
+      return response.data;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`Python agent service error: ${error.response?.data?.detail || error.message}`);
       }
       throw error;
     }
   }
 }
 
-export const glmService = GLMService.getInstance();
+export const glmService = new GLMServiceClass();
