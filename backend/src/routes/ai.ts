@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { glmService } from '../services/glmService';
+import { opencodeService } from '../services/opencodeService';
 
 const router = Router();
 
@@ -15,11 +15,9 @@ router.post('/chat', async (req: Request, res: Response) => {
   }
 
   try {
-    const response = await glmService.chat(
-      [{ role: 'user', content: message }],
-      model || process.env.GLM_MODEL_FAST || 'glm-4.7'
-    );
-    res.json({ response });
+    const useSmartModel = model === 'glm-5';
+    const result = await opencodeService.chat(message, 'planner', useSmartModel);
+    res.json({ response: result.response });
   } catch (error: unknown) {
     console.error('AI Chat Error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Internal Server Error';
@@ -40,7 +38,7 @@ router.post('/parse-ticket', async (req: Request, res: Response) => {
   }
 
   try {
-    const parsedTicket = await glmService.parseTicket(ticket_key, ticket_data);
+    const parsedTicket = await opencodeService.parseTicket(ticket_key, ticket_data);
     res.json(parsedTicket);
   } catch (error: unknown) {
     console.error('Parse Ticket Error:', error);
@@ -62,7 +60,7 @@ router.post('/analyze-task', async (req: Request, res: Response) => {
   }
 
   try {
-    const analysis = await glmService.analyzeTask(description);
+    const analysis = await opencodeService.analyzeTask(description);
     res.json(analysis);
   } catch (error: unknown) {
     console.error('Analyze Task Error:', error);

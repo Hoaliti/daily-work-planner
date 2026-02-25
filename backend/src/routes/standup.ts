@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { standupService } from '../services/standupService';
-import { glmService } from '../services/glmService';
+import { opencodeService } from '../services/opencodeService';
 import { db } from '../db';
 
 const router = Router();
@@ -59,11 +59,8 @@ Please generate a clear, professional standup update in the following format:
 
 Keep it concise and suitable for a standup meeting. Use professional language.`;
 
-    const response = await glmService.chat(
-      [{ role: 'user', content: prompt }],
-      'glm-5'
-    );
-
+    const result = await opencodeService.chat(prompt, 'planner', true);
+    const response = result.response;
     // Save to database
     const today = new Date().toISOString().split('T')[0];
     db.prepare(`

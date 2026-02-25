@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { glmService } from '../services/glmService';
+import { opencodeService } from '../services/opencodeService';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -24,7 +24,7 @@ router.post('/analyze', async (req: Request, res: Response) => {
     const { description, planId } = req.body;
     
     // Call Python agent service to analyze the task
-    const analysis = await glmService.analyzeTask(description);
+    const analysis = await opencodeService.analyzeTask(description);
     
     const taskId = uuidv4();
     

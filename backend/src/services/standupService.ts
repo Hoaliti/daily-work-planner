@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { glmService } from './glmService';
+import { opencodeService } from './opencodeService';
 import { WorkLog, Ticket, Task, Standup } from '../types';
 
 export class StandupService {
@@ -33,12 +33,9 @@ ${todaySummary}
 
 Please generate a concise standup update for me. Format it with "Yesterday", "Today", and "Blockers" sections.`;
 
-    // 4. Call GLM service
-    const content = await glmService.chat([
-      { role: 'system', content: 'You are a helpful assistant that generates daily standup updates.' },
-      { role: 'user', content: prompt }
-    ]);
-
+    // 4. Call OpenCode service
+    const chatResult = await opencodeService.chat(prompt, 'planner', true);
+    const content = chatResult.response;
     // 5. Save to DB
     const stmt = db.prepare(`
       INSERT INTO standups (date, content)

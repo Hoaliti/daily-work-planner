@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { glmService } from '../services/glmService';
+import { opencodeService } from '../services/opencodeService';
 
 const router = Router();
 
@@ -8,7 +8,7 @@ router.post('/recommend-today', async (req: Request, res: Response) => {
   try {
     const { planId, tasks } = req.body;
     
-    // Build prompt for GLM
+    // Build prompt
     const prompt = `I have the following tasks in my plan. Please recommend which ones I should focus on today based on priority, dependencies, and urgency.
 
 Tasks:
@@ -21,12 +21,9 @@ Please provide:
 2. Brief explanation for each recommendation
 3. Any dependencies or blockers to consider`;
 
-    const response = await glmService.chat(
-      [{ role: 'user', content: prompt }],
-      'glm-5'
-    );
+    const result = await opencodeService.chat(prompt, 'planner', true);
 
-    res.json({ recommendation: response });
+    res.json({ recommendation: result.response });
   } catch (error) {
     console.error('Failed to get recommendation:', error);
     res.status(500).json({ error: 'Failed to get recommendation' });
@@ -50,12 +47,9 @@ Please provide:
 3. Potential challenges or gotchas
 4. Estimated time if possible`;
 
-    const response = await glmService.chat(
-      [{ role: 'user', content: prompt }],
-      'glm-5'
-    );
+    const result = await opencodeService.chat(prompt, 'planner', true);
 
-    res.json({ guidance: response });
+    res.json({ guidance: result.response });
   } catch (error) {
     console.error('Failed to get task guidance:', error);
     res.status(500).json({ error: 'Failed to get task guidance' });

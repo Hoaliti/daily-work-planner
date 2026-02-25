@@ -1,6 +1,7 @@
+import 'dotenv/config'; // MUST be first - load env before any imports
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { initDB } from './db';
 import jiraRoutes from './routes/jira';
 import aiRoutes from './routes/ai';
@@ -9,7 +10,6 @@ import plansRoutes from './routes/plans';
 import tasksRoutes from './routes/tasks';
 import planningRoutes from './routes/planning';
 
-dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3001;
