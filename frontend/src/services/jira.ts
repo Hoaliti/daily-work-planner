@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const JIRA_API_URL = '/api/jira';
-const GLM_API_URL = '/api/glm';
+const AI_API_URL = '/api/ai';
 
 export interface JiraTicket {
   key: string;
@@ -13,6 +13,8 @@ export interface JiraTicket {
   story_points?: number | null;
   estimate?: number | null;
   raw_analysis?: string;
+  labels?: string[];
+  components?: string[];
 }
 
 /**
@@ -31,10 +33,9 @@ export const parseTicketWithGLM = async (
   ticketKey: string,
   rawTicketData: Record<string, unknown>
 ): Promise<JiraTicket> => {
-  const response = await axios.post(`${GLM_API_URL}/parse-ticket`, {
+  const response = await axios.post(`${AI_API_URL}/parse-ticket`, {
     ticket_key: ticketKey,
     ticket_data: rawTicketData,
-    model: 'glm-5',
   });
   return response.data;
 };

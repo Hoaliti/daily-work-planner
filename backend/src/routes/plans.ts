@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
@@ -7,15 +8,16 @@ const router = Router();
 router.post('/', (req: Request, res: Response) => {
   try {
     const { name, startDate, endDate, status } = req.body;
+    const planId = uuidv4();
     
     const stmt = db.prepare(`
-      INSERT INTO plans (name, start_date, end_date, status, created_at)
-      VALUES (?, ?, ?, ?, datetime('now'))
+      INSERT INTO plans (id, name, start_date, end_date, status, created_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
     `);
     
-    const result = stmt.run(name, startDate, endDate, status || 'active');
+    stmt.run(planId, name, startDate, endDate, status || 'active');
     
-    const newPlan = db.prepare('SELECT * FROM plans WHERE id = ?').get(result.lastInsertRowid);
+    const newPlan = db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
     res.json(newPlan);
   } catch (error) {
     console.error('Failed to create plan:', error);
