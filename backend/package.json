@@ -9,7 +9,6 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.2.14",
     "@types/uuid": "^10.0.0",
     "axios": "^1.6.7",
     "better-sqlite3": "^12.6.2",

@@ -1,39 +1,12 @@
-import { createOpencode, createOpencodeClient } from '@opencode-ai/sdk';
+import axios from 'axios';
 
-// Model configuration - uses opencode's zai-coding-plan
+// OpenCode server configuration
+// By default, connects to locally running opencode server
+const OPENCODE_URL = process.env.OPENCODE_URL || 'http://127.0.0.1:4096';
+
+// Model configuration
 const MODEL_SMART = process.env.OPENCODE_MODEL_SMART || 'zai-coding-plan/glm-5';
 const MODEL_FAST = process.env.OPENCODE_MODEL_FAST || 'zai-coding-plan/glm-4.7';
-
-// OpenCode client singleton
-let opencodeInstance: Awaited<ReturnType<typeof createOpencode>> | null = null;
-let clientOnly: ReturnType<typeof createOpencodeClient> | null = null;
-
-/**
- * Initialize OpenCode client
- * If OPENCODE_SERVER_URL is set, connects to existing server
- * Otherwise, starts a new server instance
- */
-async function getClient() {
-  const serverUrl = process.env.OPENCODE_SERVER_URL;
-  
-  if (serverUrl) {
-    // Connect to existing opencode server
-    if (!clientOnly) {
-      clientOnly = createOpencodeClient({ baseUrl: serverUrl });
-    }
-    return clientOnly;
-  }
-  
-  // Start new opencode server
-  if (!opencodeInstance) {
-    opencodeInstance = await createOpencode({
-      hostname: process.env.OPENCODE_HOST || '127.0.0.1',
-      port: parseInt(process.env.OPENCODE_PORT || '4096'),
-    });
-    console.log(`OpenCode server started at ${opencodeInstance.server.url}`);
-  }
-  return opencodeInstance.client;
-}
 
 // Agent system prompts
 const AGENT_PROMPTS: Record<string, string> = {
@@ -76,15 +49,13 @@ interface TaskAnalysis {
 }
 
 /**
- * Extract text from a session prompt result
+ * Extract text from opencode response parts
  */
-function extractTextFromResult(result: { data?: { parts?: Array<{ type: string; text?: string }> } }): string {
+function extractTextFromParts(parts: Array<{ type: string; text?: string }>): string {
   let text = '';
-  if (result.data?.parts) {
-    for (const part of result.data.parts) {
-      if (part.type === 'text' && part.text) {
-        text += part.text;
-      }
+  for (const part of parts) {
+    if (part.type === 'text' && part.text) {
+      text += part.text;
     }
   }
   return text;
@@ -108,42 +79,40 @@ function tryParseJson<T>(text: string, fallback: T): T {
 }
 
 class OpenCodeService {
+  private async createSession(title: string): Promise<string> {
+    const response = await axios.post(`${OPENCODE_URL}/session`, { title });
+    return response.data.id;
+  }
+
+  private async sendPrompt(sessionId: string, parts: Array<{ type: string; text: string }>, modelId?: string): Promise<string> {
+    const body: {
+      parts: Array<{ type: string; text: string }>;
+      model?: { providerID: string; modelID: string };
+    } = { parts };
+    
+    if (modelId) {
+      body.model = { providerID: 'zai-coding-plan', modelID: modelId };
+    }
+    
+    const response = await axios.post(`${OPENCODE_URL}/session/${sessionId}/prompt`, body);
+    return extractTextFromParts(response.data.parts || []);
+  }
+
   /**
    * Send a chat message to an AI agent
    */
   async chat(message: string, agentType: string = 'planner', useSmartModel: boolean = false): Promise<ChatResponse> {
-    const client = await getClient();
     const model = useSmartModel ? MODEL_SMART : MODEL_FAST;
+    const modelId = useSmartModel ? 'glm-5' : 'glm-4.7';
     const systemPrompt = AGENT_PROMPTS[agentType] || AGENT_PROMPTS.planner;
 
-    // Create a session for this conversation
-    const session = await client.session.create({
-      body: { title: `Chat - ${agentType}` },
-    });
+    // Create session
+    const sessionId = await this.createSession(`Chat - ${agentType}`);
 
-    if (!session.data?.id) {
-      throw new Error('Failed to create session');
-    }
-
-    // Send system prompt as context
-    await client.session.prompt({
-      path: { id: session.data.id },
-      body: {
-        noReply: true,
-        parts: [{ type: 'text', text: systemPrompt }],
-      },
-    });
-
-    // Send user message
-    const result = await client.session.prompt({
-      path: { id: session.data.id },
-      body: {
-        model: { providerID: 'zai-coding-plan', modelID: useSmartModel ? 'glm-5' : 'glm-4.7' },
-        parts: [{ type: 'text', text: message }],
-      },
-    });
-
-    const responseText = extractTextFromResult(result);
+    // Send system prompt + user message together
+    const responseText = await this.sendPrompt(sessionId, [
+      { type: 'text', text: `${systemPrompt}\n\nUser: ${message}` }
+    ], modelId);
 
     return {
       response: responseText,
@@ -156,7 +125,6 @@ class OpenCodeService {
    * Parse a Jira ticket and extract structured information
    */
   async parseTicket(ticketKey: string, ticketData: Record<string, unknown>): Promise<ParsedTicket> {
-    const client = await getClient();
     const fields = (ticketData.fields as Record<string, unknown>) || {};
 
     const prompt = `Analyze this Jira ticket and extract structured information.
@@ -182,24 +150,8 @@ Return a JSON object with these fields EXACTLY:
 
 Return ONLY valid JSON, no markdown.`;
 
-    // Create session
-    const session = await client.session.create({
-      body: { title: `Parse Ticket - ${ticketKey}` },
-    });
-
-    if (!session.data?.id) {
-      throw new Error('Failed to create session');
-    }
-
-    const result = await client.session.prompt({
-      path: { id: session.data.id },
-      body: {
-        model: { providerID: 'zai-coding-plan', modelID: 'glm-5' },
-        parts: [{ type: 'text', text: prompt }],
-      },
-    });
-
-    const responseText = extractTextFromResult(result);
+    const sessionId = await this.createSession(`Parse Ticket - ${ticketKey}`);
+    const responseText = await this.sendPrompt(sessionId, [{ type: 'text', text: prompt }], 'glm-5');
     
     // Try to parse JSON from response
     const fallback: ParsedTicket = {
@@ -222,8 +174,6 @@ Return ONLY valid JSON, no markdown.`;
    * Analyze a manual task description
    */
   async analyzeTask(description: string): Promise<TaskAnalysis> {
-    const client = await getClient();
-
     const prompt = `Analyze this task description and extract structured information.
 
 Task Description: ${description}
@@ -238,24 +188,8 @@ Return ONLY a JSON object EXACTLY:
 
 No markdown, just valid JSON.`;
 
-    // Create session
-    const session = await client.session.create({
-      body: { title: 'Analyze Task' },
-    });
-
-    if (!session.data?.id) {
-      throw new Error('Failed to create session');
-    }
-
-    const result = await client.session.prompt({
-      path: { id: session.data.id },
-      body: {
-        model: { providerID: 'zai-coding-plan', modelID: 'glm-4.7' },
-        parts: [{ type: 'text', text: prompt }],
-      },
-    });
-
-    const responseText = extractTextFromResult(result);
+    const sessionId = await this.createSession('Analyze Task');
+    const responseText = await this.sendPrompt(sessionId, [{ type: 'text', text: prompt }], 'glm-4.7');
     
     // Try to parse JSON from response
     const fallback: TaskAnalysis = {
@@ -271,8 +205,6 @@ No markdown, just valid JSON.`;
    * Generate standup notes
    */
   async generateStandup(yesterdayLogs: Array<{ description: string; duration_minutes: number }>, todayTickets: Array<{ key: string; summary: string; status: string }>): Promise<string> {
-    const client = await getClient();
-
     const yesterdaySummary = yesterdayLogs.length > 0
       ? yesterdayLogs.map(log => `- ${log.description} (${log.duration_minutes}m)`).join('\n')
       : 'No work logged';
@@ -291,24 +223,8 @@ ${todaySummary}
 
 Format with **Yesterday:**, **Today:**, **Blockers:** sections.`;
 
-    // Create session
-    const session = await client.session.create({
-      body: { title: 'Generate Standup' },
-    });
-
-    if (!session.data?.id) {
-      throw new Error('Failed to create session');
-    }
-
-    const result = await client.session.prompt({
-      path: { id: session.data.id },
-      body: {
-        model: { providerID: 'zai-coding-plan', modelID: 'glm-5' },
-        parts: [{ type: 'text', text: prompt }],
-      },
-    });
-
-    return extractTextFromResult(result);
+    const sessionId = await this.createSession('Generate Standup');
+    return this.sendPrompt(sessionId, [{ type: 'text', text: prompt }], 'glm-5');
   }
 }
 
