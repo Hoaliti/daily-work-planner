@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Ticket, AlertCircle, CheckCircle2, Circle } from 'lucide-react';
-import { type JiraTicket } from '../services/jira';
+import { Plus, Ticket, AlertCircle, CheckCircle2, Circle, Loader2 } from 'lucide-react';
+import { getTicket, parseTicketWithGLM, type JiraTicket } from '../services/jira';
 
 const TicketList: React.FC = () => {
   const [tickets, setTickets] = useState<JiraTicket[]>([]);
@@ -16,22 +16,23 @@ const TicketList: React.FC = () => {
     setError(null);
 
     try {
-      // In a real app, we'd fetch the ticket details from the backend
-      // For now, we'll simulate adding it or fetch if the backend is ready
-      // const ticket = await getTicket(newTicketKey);
-      
-      // Mocking the response for now since backend might not be fully ready
-      const mockTicket: JiraTicket = {
-        key: newTicketKey.toUpperCase(),
-        summary: 'Sample Ticket Summary',
-        status: 'In Progress',
-        priority: 'High'
-      };
-      
-      setTickets([...tickets, mockTicket]);
+      // Step 1: Fetch raw ticket data from Jira (read-only)
+      const rawTicketData = await getTicket(newTicketKey);
+
+      if (!rawTicketData) {
+        setError('Failed to fetch ticket from Jira');
+        return;
+      }
+
+      // Step 2: Parse with GLM-5 to extract structured info
+      const parsedTicket = await parseTicketWithGLM(newTicketKey, rawTicketData);
+
+      // Step 3: Add to local state
+      setTickets((prev) => [...prev, parsedTicket]);
       setNewTicketKey('');
     } catch (err) {
-      setError('Failed to fetch ticket. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch and parse ticket';
+      setError(errorMessage);
       console.error(err);
     } finally {
       setLoading(false);
@@ -62,15 +63,16 @@ const TicketList: React.FC = () => {
           type="text"
           value={newTicketKey}
           onChange={(e) => setNewTicketKey(e.target.value)}
-          placeholder="Add ticket (e.g. PROJ-123)"
+          placeholder="Add ticket (e.g. AMPL-2037)"
           className="flex-1 px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          disabled={loading}
         />
         <button
           type="submit"
           disabled={loading}
           className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
         >
-          <Plus className="w-4 h-4" />
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
         </button>
       </form>
 
@@ -83,7 +85,7 @@ const TicketList: React.FC = () => {
       <div className="flex-1 overflow-y-auto space-y-2">
         {tickets.length === 0 ? (
           <div className="text-center text-gray-500 py-8 text-sm">
-            No tickets tracked yet.
+            No tickets tracked yet. Enter a Jira ticket key above.
           </div>
         ) : (
           tickets.map((ticket) => (

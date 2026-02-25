@@ -5,9 +5,9 @@ import { initDB } from './db';
 import jiraRoutes from './routes/jira';
 import aiRoutes from './routes/ai';
 import standupRoutes from './routes/standup';
-
-
-
+import plansRoutes from './routes/plans';
+import tasksRoutes from './routes/tasks';
+import planningRoutes from './routes/planning';
 
 dotenv.config();
 
@@ -22,16 +22,13 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', message: 'Backend is running' });
 });
 
-// Jira routes
+// Routes
 app.use('/api/jira', jiraRoutes);
-// AI routes
 app.use('/api/ai', aiRoutes);
-// Standup routes
 app.use('/api/standup', standupRoutes);
-
-
-
-
+app.use('/api/plans', plansRoutes);
+app.use('/api/tasks', tasksRoutes);
+app.use('/api/planning', planningRoutes);
 
 // Initialize database and start server
 const startServer = async () => {

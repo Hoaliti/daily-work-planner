@@ -1,98 +1,151 @@
-import React, { useState, useEffect } from 'react';
-import { generateStandup, getStandup } from '../services/standup';
-import { AxiosError } from 'axios';
+import React, { useState } from 'react';
+import { Mic, Copy, Loader2, Sparkles } from 'lucide-react';
+import { type Task } from '../types';
 
-const StandupGenerator: React.FC = () => {
-  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [content, setContent] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
+interface StandupGeneratorProps {
+  tasks: Task[];
+  planId: string;
+}
+
+const StandupGenerator: React.FC<StandupGeneratorProps> = ({ tasks, planId }) => {
+  const [yesterdayWork, setYesterdayWork] = useState('');
+  const [todayForecast, setTodayForecast] = useState('');
+  const [blockers, setBlockers] = useState('');
+  const [generatedStandup, setGeneratedStandup] = useState('');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async () => {
+    if (!yesterdayWork.trim() && !todayForecast.trim()) {
+      setError('Please provide at least what you did yesterday or your plan for today');
+      return;
+    }
+
     setLoading(true);
     setError(null);
+
     try {
-      const result = await generateStandup(date);
-      setContent(result.content);
+      const response = await fetch('/api/standup/generate-interactive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planId,
+          yesterdayWork,
+          todayForecast,
+          blockers,
+          todayTasks: tasks.filter(t => 
+            t.planId === planId && 
+            (t.status === 'in_progress' || t.status === 'todo')
+          ),
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to generate standup');
+
+      const data = await response.json();
+      setGeneratedStandup(data.standup);
     } catch (err) {
-      const error = err as AxiosError<{ error: string }>;
-      setError(error.response?.data?.error || 'Failed to generate standup');
+      setError(err instanceof Error ? err.message : 'Failed to generate standup');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchStandup = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await getStandup(date);
-      setContent(result.content);
-    } catch (err) {
-      const error = err as AxiosError<{ error: string }>;
-      // If 404, it just means no standup generated yet, which is fine.
-      if (error.response?.status === 404) {
-        setContent('');
-      } else {
-        setError(error.response?.data?.error || 'Failed to fetch standup');
-      }
-    } finally {
-      setLoading(false);
-    }
+  const handleCopy = () => {
+    navigator.clipboard.writeText(generatedStandup);
   };
-
-  useEffect(() => {
-    if (date) {
-      fetchStandup();
-    }
-  }, [date]);
 
   return (
-    <div className="h-full flex flex-col bg-white rounded-lg shadow p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-          Daily Standup
-        </h3>
+    <div className="bg-white rounded-lg shadow h-full flex flex-col">
+      <div className="p-4 border-b bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-t-lg">
         <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500"
-          />
-          <button
-            onClick={handleGenerate}
-            disabled={loading}
-            className={`text-xs px-3 py-1 rounded text-white font-medium transition-colors ${
-              loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-            }`}
-          >
-            {loading ? 'Generating...' : 'Generate'}
-          </button>
+          <Mic className="w-5 h-5" />
+          <h3 className="font-semibold">Daily Standup</h3>
         </div>
+        <p className="text-xs opacity-90 mt-1">Tell me about your work and I'll generate a standup update</p>
       </div>
 
-      {error && (
-        <div className="mb-2 text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100">
-          {error}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Yesterday */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            What did you do yesterday?
+          </label>
+          <textarea
+            value={yesterdayWork}
+            onChange={(e) => setYesterdayWork(e.target.value)}
+            placeholder="e.g., Finished the login page, worked on API integration..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+            rows={3}
+          />
         </div>
-      )}
 
-      <div className="flex-1 min-h-0 relative">
-        <textarea
-          value={content}
-          readOnly
-          className="w-full h-full resize-none text-sm text-gray-700 border border-gray-200 rounded p-3 focus:outline-none focus:border-blue-500 bg-gray-50 font-mono whitespace-pre-wrap"
-          placeholder="Select a date and click Generate to create your standup update..."
-        />
-        {content && (
-          <button
-            onClick={() => navigator.clipboard.writeText(content)}
-            className="absolute top-2 right-2 text-xs bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded hover:bg-gray-50 shadow-sm"
-            title="Copy to clipboard"
-          >
-            Copy
-          </button>
+        {/* Today */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            What's your plan for today?
+          </label>
+          <textarea
+            value={todayForecast}
+            onChange={(e) => setTodayForecast(e.target.value)}
+            placeholder="e.g., Planning to work on the dashboard, start the database migration..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+            rows={3}
+          />
+        </div>
+
+        {/* Blockers */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Any blockers? <span className="text-gray-400">(optional)</span>
+          </label>
+          <textarea
+            value={blockers}
+            onChange={(e) => setBlockers(e.target.value)}
+            placeholder="e.g., Waiting for code review, need access to..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+            rows={2}
+          />
+        </div>
+
+        {/* Generate Button */}
+        <button
+          onClick={handleGenerate}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-lg hover:from-green-700 hover:to-teal-700 disabled:opacity-50 transition-all font-medium"
+        >
+          {loading ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Sparkles className="w-5 h-5" />
+          )}
+          {loading ? 'Generating...' : 'Generate Standup Update'}
+        </button>
+
+        {/* Error */}
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+            {error}
+          </div>
+        )}
+
+        {/* Generated Output */}
+        {generatedStandup && (
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Your Standup Update
+            </label>
+            <div className="bg-gray-50 border rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap font-mono">
+              {generatedStandup}
+            </div>
+            <button
+              onClick={handleCopy}
+              className="absolute top-8 right-2 flex items-center gap-1 text-xs bg-white border px-2 py-1 rounded hover:bg-gray-50 shadow-sm"
+            >
+              <Copy className="w-3 h-3" />
+              Copy
+            </button>
+          </div>
         )}
       </div>
     </div>

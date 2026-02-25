@@ -3,12 +3,29 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const GLM_API_URL = process.env.GLM_API_URL || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+const GLM_SERVICE_URL = process.env.GLM_SERVICE_URL || 'http://localhost:3002';
 const GLM_API_KEY = process.env.GLM_API_KEY;
 
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+export interface ChatResponse {
+  response: string;
+  model: string;
+}
+
+export interface TicketParseResponse {
+  key: string;
+  summary: string;
+  status: string;
+  priority: string;
+  description: string | null;
+  assignee: string | null;
+  story_points: number | null;
+  estimate: number | null;
+  raw_analysis: string;
 }
 
 export class GLMService {
@@ -30,27 +47,62 @@ export class GLMService {
 
     try {
       const response = await axios.post(
-        GLM_API_URL,
+        `${GLM_SERVICE_URL}/chat`,
         {
+          message: messages[messages.length - 1].content,
+          agent_type: 'planner',
           model,
-          messages,
+          max_tokens: 4096,
+          temperature: 0.7,
         },
         {
           headers: {
-            'Authorization': `Bearer ${GLM_API_KEY}`,
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GLM_API_KEY}`,
           },
         }
       );
 
-      if (response.data && response.data.choices && response.data.choices.length > 0) {
-        return response.data.choices[0].message.content;
+      if (response.data && response.data.response) {
+        return response.data.response;
       } else {
-        throw new Error('Unexpected response format from GLM API');
+        throw new Error('Unexpected response format from Python agent service');
       }
-    } catch (error: any) {
-      console.error('Error calling GLM API:', error.response?.data || error.message);
-      throw new Error(`GLM API call failed: ${error.response?.data?.error?.message || error.message}`);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`Python agent service error: ${error.response?.data?.detail || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  public async parseTicket(ticketKey: string, ticketData: Record<string, unknown>): Promise<TicketParseResponse> {
+    if (!GLM_API_KEY) {
+      throw new Error('GLM_API_KEY is not defined in environment variables');
+    }
+
+    try {
+      const response = await axios.post(
+        `${GLM_SERVICE_URL}/parse-ticket`,
+        {
+          ticket_key: ticketKey,
+          ticket_data: ticketData,
+          model: 'glm-5',
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GLM_API_KEY}`,
+          },
+        }
+      );
+
+      return response.data;
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`Python agent service error: ${error.response?.data?.detail || error.message}`)
+      }
+      throw error;
     }
   }
 }
